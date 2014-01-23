@@ -114,6 +114,9 @@ int main(int argc, char *argv[])
 	struct egl_device device = { 0 };
 	egl_initialize(&device);
 
+	int display_width, display_height;
+	fbGetDisplayGeometry(device.display_type, &display_width, &display_height);
+
 	system("setterm -cursor off");
 
 	struct timespec time_beg, time_end;
@@ -124,7 +127,10 @@ int main(int argc, char *argv[])
 		eglSwapBuffers(device.display, device.surface);
 
 		clock_gettime(CLOCK_MONOTONIC, &time_end);
-		printf("Current FPS: %.3Lf%10s\r", 1.0L / ((time_end.tv_sec - time_beg.tv_sec) + ((time_end.tv_nsec - time_beg.tv_nsec) / 1000000000.0)), " ");
+
+		printf("Current FPS: %.3Lf%10s\r",
+			1.0L / ((time_end.tv_sec - time_beg.tv_sec) + ((time_end.tv_nsec - time_beg.tv_nsec) / 1000000000.0)),
+			" ");
 	}
 
 	printf("\n");
@@ -134,8 +140,7 @@ int main(int argc, char *argv[])
 	egl_deinitialize(&device);
 
 	char cmd_line[32];
-	int width = 1920, height = 1080;
-	sprintf(cmd_line, "fbset -xres %d -yres %d", width, height);
+	sprintf(cmd_line, "fbset -xres %d -yres %d", display_width, display_height);
 	system(cmd_line);
 
 	system("echo 1 > /sys/devices/virtual/graphics/fbcon/cursor_blink");
