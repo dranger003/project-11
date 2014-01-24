@@ -18,6 +18,8 @@ struct egl_device {
 	EGLSurface surface;
 	const EGLint *context_attributes;
 	EGLContext context;
+    int width;
+    int height;
 };
 
 volatile sig_atomic_t done = 0;
@@ -31,7 +33,9 @@ int egl_initialize(struct egl_device *device)
 {
 	device->display_type = (EGLNativeDisplayType)fbGetDisplayByIndex(0);
 
-	device->display = eglGetDisplay(device->display_type);
+    fbGetDisplayGeometry(device->display_type, &device->width, &device->height);
+
+    device->display = eglGetDisplay(device->display_type);
 	assert(eglGetError() == EGL_SUCCESS);
 
 	eglInitialize(device->display, NULL, NULL);
@@ -105,6 +109,26 @@ int egl_deinitialize(struct egl_device *device)
 	return 0;
 }
 
+GLuint gl_load_shader(GLenum type, const char *source)
+{
+    GLuint shader = glCreateShader(type);
+    if (!shader)
+        return -1;
+
+    glShaderSource(shader, 1, &source, 0);
+    glCompileShader(shader);
+
+    GLint compiled;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
+    if (!compiled) {
+        glDeleteShader(shader);
+
+        return -1;
+    }
+
+    return shader;
+}
+
 int main(int argc, char *argv[])
 {
 	signal(SIGINT, &signal_handler);
@@ -123,8 +147,58 @@ int main(int argc, char *argv[])
 
 	struct timespec time_beg, time_end;
 
+    static const GLchar *vertex_shader_source[] = {
+        "attribute vec4 vPosition;      \n"
+        "                               \n"
+        "void main() {                  \n"
+        "   gl_Position = vPosition;    \n"
+        "}                              \n"
+    };
+
+    static const GLchar *fragment_shader_source[] = {
+        "precision mediump float;                       \n"
+        "                                               \n"
+        "void main() {                                  \n"
+        "   gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);    \n"
+        "}                                              \n"
+    };
+
+    GLuint vertex_shader = gl_load_shader(GL_VERTEX_SHADER, vertex_shader_source[0]);
+    GLuint fragment_shader = gl_load_shader(GL_FRAGMENT_SHADER, fragment_shader_source[0]);
+
+    GLuint program = glCreateProgram();
+
+    glAttachShader(program, vertex_shader);
+    glAttachShader(program, fragment_shader);
+
+    glBindAttribLocation(program, 0, "vPosition");
+
+    glLinkProgram(program);
+
+    GLint linked;
+    glGetProgramiv(program, GL_LINK_STATUS, &linked);
+    if (!linked) {
+        glDeleteProgram(program);
+        printf("ERROR: glLinkProgram()\n");
+    }
+
+    glUseProgram(program);
+
+    GLfloat vertices[] = {
+         0.0f,  0.5f,  0.0f,
+        -0.5f, -0.5f,  0.0f,
+         0.5f, -0.5f,  0.0f
+    };
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, vertices);
+    glEnableVertexAttribArray(0);
+
+    glViewport(0, 0, device.width, device.height);
+
     glClearColor(128 / 255.0f, 128 / 255.0f, 128 / 255.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
+
+    glDrawArrays(GL_TRIANGLES, 0, 3);
 
     while (!done) {
 		clock_gettime(CLOCK_MONOTONIC, &time_beg);
