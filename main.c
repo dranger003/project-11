@@ -3,9 +3,16 @@
 #include <assert.h>
 #include <signal.h>
 #include <time.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 #include <EGL/egl.h>
 #include <EGL/eglvivante.h>
+#include <GLES2/gl2.h>
+
+#include <fontconfig/fontconfig.h>
+#include <ft2build.h>
+#include FT_FREETYPE_H
 
 struct egl_device {
 	EGLNativeDisplayType display_type;
@@ -16,6 +23,11 @@ struct egl_device {
 	EGLSurface surface;
 	const EGLint *context_attributes;
 	EGLContext context;
+};
+
+struct freetype_library {
+	FT_Library handle;
+	FT_Face face;
 };
 
 volatile sig_atomic_t done = 0;
@@ -103,11 +115,93 @@ int egl_deinitialize(struct egl_device *device)
 	return 0;
 }
 
-int main(int argc, char *argv[])
+void egl_render()
 {
-	signal(SIGINT, &signal_handler);
-	signal(SIGTERM, &signal_handler);
+	glClearColor(0.5f, 0.5f, 0.5f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT);
+}
 
+char *font_name;
+char *font_path;
+int font_size;
+
+int freetype_initialize(struct freetype_library *library)
+{
+/*
+	char *file_name;
+
+	{ // TODO: Cleanup this mess! //////////////////////////////////
+		FcConfig *config = FcInitLoadConfigAndFonts();
+		FcPattern *pattern = FcNameParse((const FcChar8 *)font_name);
+		FcConfigSubstitute(config, pattern, FcMatchPattern);
+		FcDefaultSubstitute(pattern);
+		FcResult result;
+		FcPattern *font = FcFontMatch(config, pattern, &result);
+		FcChar8 *file;
+		FcPatternGetString(font, FC_FILE, 0, &file);
+		file_name = (char *)file;
+	} //////////////////////////////////////////////////////////////
+*/
+	if (FT_Init_FreeType(&library->handle))
+		return 1;
+
+	if (FT_New_Face(library->handle, font_path, 0, &library->face))
+		return 1;
+
+	FT_Set_Pixel_Sizes(library->face, 0, font_size);
+
+	return 0;
+}
+
+int freetype_deinitialize(struct freetype_library *library)
+{
+	return 0;
+}
+
+void render_text(struct freetype_library *l, const char *text, float x, float y, float sx, float sy)
+{
+	const char *p;
+	FT_GlyphSlot g = l->face->glyph;
+
+	for (p = text; *p; p++) {
+		if (FT_Load_Char(l->face, *p, FT_LOAD_RENDER))
+			continue;
+
+		glTexImage2D(
+			GL_TEXTURE_2D,
+			0,
+			GL_ALPHA,
+			g->bitmap.width,
+			g->bitmap.rows,
+			0,
+			GL_ALPHA,
+			GL_UNSIGNED_BYTE,
+			g->bitmap.buffer);
+
+		float x2 = x + g->bitmap_left * sx;
+		float y2 = -y - g->bitmap_top * sy;
+		float w = g->bitmap.width * sx;
+		float h = g->bitmap.rows * sy;
+
+		GLfloat box[4][4] = {
+			{ x2,     -y2    , 0, 0 },
+			{ x2 + w, -y2    , 1, 0 },
+			{ x2,     -y2 - h, 0, 1 },
+			{ x2 + w, -y2 - h, 1, 1 },
+		};
+
+		glBufferData(GL_ARRAY_BUFFER, sizeof(box), box, GL_DYNAMIC_DRAW);
+		glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+		x += (g->advance.x >> 6) * sx;
+		y += (g->advance.y >> 6) * sy;
+	}
+}
+
+char *font_text;
+
+int run()
+{
 	setenv("FB_MULTI_BUFFER", "2", 0);
 	system("echo 0 > /sys/devices/virtual/graphics/fbcon/cursor_blink");
 
@@ -119,17 +213,108 @@ int main(int argc, char *argv[])
 
 	system("setterm -cursor off");
 
-	struct timespec time_beg, time_end;
+	struct timespec run_beg, fps_beg, time_end;
+	clock_gettime(CLOCK_MONOTONIC, &run_beg);
+
+			static const GLchar *vertex_shader_source[] = {
+				"attribute vec4 coord;						\n"
+				"varying vec2 texcoord;						\n"
+				"											\n"
+				"void main(void) {							\n"
+				"  gl_Position = vec4(coord.xy, 0, 1);		\n"
+				"  texcoord = coord.zw;						\n"
+				"}											\n"
+			};
+
+			static const GLchar *fragment_shader_source[] = {
+				"varying vec2 texcoord;													\n"
+				"uniform sampler2D tex;													\n"
+				"uniform vec4 color;													\n"
+				"																		\n"
+				"void main(void) {														\n"
+				"  gl_FragColor = vec4(1, 1, 1, texture2D(tex, texcoord).a) * color;	\n"
+				"}																		\n"
+			};
+
+			GLint compiled, linked;
+
+			GLuint vertex_shader = glCreateShader(GL_VERTEX_SHADER);
+			glShaderSource(vertex_shader, 1, vertex_shader_source, NULL);
+			glCompileShader(vertex_shader);
+			glGetShaderiv(vertex_shader, GL_COMPILE_STATUS, &compiled);
+			assert(compiled != 0);
+
+			GLuint fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
+			glShaderSource(fragment_shader, 1, fragment_shader_source, NULL);
+			glCompileShader(fragment_shader);
+			glGetShaderiv(fragment_shader, GL_COMPILE_STATUS, &compiled);
+			assert(compiled != 0);
+
+			GLuint program = glCreateProgram();
+
+			glAttachShader(program, vertex_shader);
+			glAttachShader(program, fragment_shader);
+
+			glLinkProgram(program);
+
+			glGetProgramiv(program, GL_LINK_STATUS, &linked);
+			assert(linked != 0);
+
+			glUseProgram(program);
+
+			GLint attribute_coord = glGetAttribLocation(program, "coord");
+			GLint uniform_tex = glGetUniformLocation(program, "tex");
+			GLint uniform_color = glGetUniformLocation(program, "color");
+
+			glEnable(GL_BLEND);
+			glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+			GLuint tex;
+			glActiveTexture(GL_TEXTURE0);
+			glGenTextures(1, &tex);
+			glBindTexture(GL_TEXTURE_2D, tex);
+			glUniform1i(uniform_tex, 0);
+
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+			glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
+			GLuint vbo;
+			glGenBuffers(1, &vbo);
+			glEnableVertexAttribArray(attribute_coord);
+			glBindBuffer(GL_ARRAY_BUFFER, vbo);
+			glVertexAttribPointer(attribute_coord, 4, GL_FLOAT, GL_FALSE, 0, 0);
+
+//			GLfloat black[4] = { 0, 0, 0, 1 };
+			GLfloat white[4] = { 1, 1, 1, 1 };
+			glUniform4fv(uniform_color, 1, white);
+
+			float sx = 2.0 / 1920;
+			float sy = 2.0 / 1080;
+
+			struct freetype_library library;
+			assert(freetype_initialize(&library) == 0);
+
+		egl_render();
+
+		render_text(
+			&library,
+			font_text,
+			-1 + 8 * sx,   1 - 50 * sy,    sx, sy);
 
 	while (!done) {
-		clock_gettime(CLOCK_MONOTONIC, &time_beg);
+		clock_gettime(CLOCK_MONOTONIC, &fps_beg);
 
 		eglSwapBuffers(device.display, device.surface);
 
 		clock_gettime(CLOCK_MONOTONIC, &time_end);
 
-		printf("Current FPS: %.3Lf%10s\r",
-			1.0L / ((time_end.tv_sec - time_beg.tv_sec) + ((time_end.tv_nsec - time_beg.tv_nsec) / 1000000000.0)),
+		printf("RT: %.3fs, FPS: %.3Lf%10s\r",
+			time_end.tv_sec - run_beg.tv_sec + ((time_end.tv_nsec - run_beg.tv_nsec) / 1000000000.0),
+			1.0L / ((time_end.tv_sec - fps_beg.tv_sec) + ((time_end.tv_nsec - fps_beg.tv_nsec) / 1000000000.0)),
 			" ");
 	}
 
@@ -146,4 +331,19 @@ int main(int argc, char *argv[])
 	system("echo 1 > /sys/devices/virtual/graphics/fbcon/cursor_blink");
 
 	return 0;
+}
+
+int main(int argc, char *argv[])
+{
+	font_name = argv[1];
+	font_path = argv[1];
+	font_size = atoi(argv[2]);
+	font_text = argv[3];
+
+	signal(SIGINT, &signal_handler);
+	signal(SIGTERM, &signal_handler);
+
+	int result = run();
+
+	return result;
 }
