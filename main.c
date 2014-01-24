@@ -6,6 +6,8 @@
 
 #include <EGL/egl.h>
 #include <EGL/eglvivante.h>
+#include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
 
 struct egl_device {
 	EGLNativeDisplayType display_type;
@@ -121,10 +123,13 @@ int main(int argc, char *argv[])
 
 	struct timespec time_beg, time_end;
 
-	while (!done) {
+    glClearColor(128 / 255.0f, 128 / 255.0f, 128 / 255.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    while (!done) {
 		clock_gettime(CLOCK_MONOTONIC, &time_beg);
 
-		eglSwapBuffers(device.display, device.surface);
+        eglSwapBuffers(device.display, device.surface);
 
 		clock_gettime(CLOCK_MONOTONIC, &time_end);
 
