@@ -9,15 +9,17 @@
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 
+#include "pngx.h"
+
 struct egl_device {
-	EGLNativeDisplayType display_type;
-	EGLDisplay display;
-	const EGLint *config_attributes;
-	EGLConfig config;
-	EGLNativeWindowType window;
-	EGLSurface surface;
-	const EGLint *context_attributes;
-	EGLContext context;
+    EGLNativeDisplayType display_type;
+    EGLDisplay display;
+    const EGLint *config_attributes;
+    EGLConfig config;
+    EGLNativeWindowType window;
+    EGLSurface surface;
+    const EGLint *context_attributes;
+    EGLContext context;
     int width;
     int height;
 };
@@ -26,87 +28,98 @@ volatile sig_atomic_t done = 0;
 
 void signal_handler(int signal)
 {
-	done = 1;
+    done = 1;
+}
+
+int clock_gettime_diff(const struct timespec *beg, const struct timespec *end, struct timespec *diff)
+{
+    if (!diff)
+        return -1;
+
+    diff->tv_sec = end->tv_sec - beg->tv_sec;
+    diff->tv_nsec = end->tv_nsec - beg->tv_nsec;
+
+    return 0;
 }
 
 int egl_initialize(struct egl_device *device)
 {
-	device->display_type = (EGLNativeDisplayType)fbGetDisplayByIndex(0);
+    device->display_type = (EGLNativeDisplayType)fbGetDisplayByIndex(0);
 
     fbGetDisplayGeometry(device->display_type, &device->width, &device->height);
 
     device->display = eglGetDisplay(device->display_type);
-	assert(eglGetError() == EGL_SUCCESS);
+    assert(eglGetError() == EGL_SUCCESS);
 
-	eglInitialize(device->display, NULL, NULL);
-	assert(eglGetError() == EGL_SUCCESS);
+    eglInitialize(device->display, NULL, NULL);
+    assert(eglGetError() == EGL_SUCCESS);
 
-	eglBindAPI(EGL_OPENGL_ES_API);
-	assert(eglGetError() == EGL_SUCCESS);
+    eglBindAPI(EGL_OPENGL_ES_API);
+    assert(eglGetError() == EGL_SUCCESS);
 
-	static const EGLint config_attributes[] = {
-		EGL_SAMPLES,			0,
-		EGL_RED_SIZE,			8,
-		EGL_GREEN_SIZE,			8,
-		EGL_BLUE_SIZE,			8,
-		EGL_ALPHA_SIZE,			EGL_DONT_CARE,
-		EGL_DEPTH_SIZE,			0,
-		EGL_SURFACE_TYPE,		EGL_WINDOW_BIT,
-		EGL_NONE
-	};
+    static const EGLint config_attributes[] = {
+        EGL_SAMPLES,        0,
+        EGL_RED_SIZE,       8,
+        EGL_GREEN_SIZE,     8,
+        EGL_BLUE_SIZE,      8,
+        EGL_ALPHA_SIZE,     EGL_DONT_CARE,
+        EGL_DEPTH_SIZE,     0,
+        EGL_SURFACE_TYPE,   EGL_WINDOW_BIT,
+        EGL_NONE
+    };
 
-	EGLint config_count = 0;
-	eglChooseConfig(device->display, config_attributes, &device->config, 1, &config_count);
-	assert(eglGetError() == EGL_SUCCESS);
-	assert(config_count == 1);
+    EGLint config_count = 0;
+    eglChooseConfig(device->display, config_attributes, &device->config, 1, &config_count);
+    assert(eglGetError() == EGL_SUCCESS);
+    assert(config_count == 1);
 
-	device->config_attributes = config_attributes;
+    device->config_attributes = config_attributes;
 
-	device->window = fbCreateWindow(device->display_type, 0, 0, 0, 0);
+    device->window = fbCreateWindow(device->display_type, 0, 0, 0, 0);
 
-	device->surface = eglCreateWindowSurface(device->display, device->config, device->window, NULL);
-	assert(eglGetError() == EGL_SUCCESS);
+    device->surface = eglCreateWindowSurface(device->display, device->config, device->window, NULL);
+    assert(eglGetError() == EGL_SUCCESS);
 
-	static const EGLint context_attributes[] = {
-		EGL_CONTEXT_CLIENT_VERSION,		2,
-		EGL_NONE
-	};
+    static const EGLint context_attributes[] = {
+        EGL_CONTEXT_CLIENT_VERSION,		2,
+        EGL_NONE
+    };
 
-	device->context = eglCreateContext(device->display, device->config, EGL_NO_CONTEXT, context_attributes);
-	assert(eglGetError() == EGL_SUCCESS);
+    device->context = eglCreateContext(device->display, device->config, EGL_NO_CONTEXT, context_attributes);
+    assert(eglGetError() == EGL_SUCCESS);
 
-	device->context_attributes = context_attributes;
+    device->context_attributes = context_attributes;
 
-	eglMakeCurrent(device->display, device->surface, device->surface, device->context);
-	assert(eglGetError() == EGL_SUCCESS);
+    eglMakeCurrent(device->display, device->surface, device->surface, device->context);
+    assert(eglGetError() == EGL_SUCCESS);
 
-	return 0;
+    return 0;
 }
 
 int egl_deinitialize(struct egl_device *device)
 {
-	eglMakeCurrent(device->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-	assert(eglGetError() == EGL_SUCCESS);
+    eglMakeCurrent(device->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+    assert(eglGetError() == EGL_SUCCESS);
 
-	eglDestroyContext(device->display, device->context);
-	assert(eglGetError() == EGL_SUCCESS);
-	device->context = (EGLContext)0;
+    eglDestroyContext(device->display, device->context);
+    assert(eglGetError() == EGL_SUCCESS);
+    device->context = (EGLContext)0;
 
-	eglDestroySurface(device->display, device->surface);
-	assert(eglGetError() == EGL_SUCCESS);
-	device->surface = (EGLSurface)0;
+    eglDestroySurface(device->display, device->surface);
+    assert(eglGetError() == EGL_SUCCESS);
+    device->surface = (EGLSurface)0;
 
-	fbDestroyWindow(device->window);
-	device->window = (EGLNativeWindowType)0;
+    fbDestroyWindow(device->window);
+    device->window = (EGLNativeWindowType)0;
 
-	eglTerminate(device->display);
-	assert(eglGetError() == EGL_SUCCESS);
-	device->display = (EGLDisplay)0;
+    eglTerminate(device->display);
+    assert(eglGetError() == EGL_SUCCESS);
+    device->display = (EGLDisplay)0;
 
-	eglReleaseThread();
-	assert(eglGetError() == EGL_SUCCESS);
+    eglReleaseThread();
+    assert(eglGetError() == EGL_SUCCESS);
 
-	return 0;
+    return 0;
 }
 
 GLuint gl_compile_shader(GLenum type, const char *source)
@@ -122,30 +135,54 @@ GLuint gl_compile_shader(GLenum type, const char *source)
     glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
     if (!compiled) {
         glDeleteShader(shader);
-
         return -1;
     }
 
     return shader;
 }
 
+GLuint gl_link_program(GLuint vertex_shader, GLuint fragment_shader)
+{
+    GLuint program = glCreateProgram();
+    if (!program)
+        return -1;
+
+    glAttachShader(program, vertex_shader);
+    glAttachShader(program, fragment_shader);
+
+    // Schedule shaders for later deletion
+    glDeleteShader(vertex_shader);
+    glDeleteShader(fragment_shader);
+
+    glLinkProgram(program);
+
+    GLint linked;
+    glGetProgramiv(program, GL_LINK_STATUS, &linked);
+    if (!linked) {
+        glDeleteProgram(program);
+        return -1;
+    }
+
+    glUseProgram(program);
+
+    // Schedule program for later deletion
+    glDeleteProgram(program);
+
+    return program;
+}
+
 int main(int argc, char *argv[])
 {
-	signal(SIGINT, &signal_handler);
-	signal(SIGTERM, &signal_handler);
+    signal(SIGINT, &signal_handler);
+    signal(SIGTERM, &signal_handler);
 
-	setenv("FB_MULTI_BUFFER", "2", 0);
-	system("echo 0 > /sys/devices/virtual/graphics/fbcon/cursor_blink");
+    setenv("FB_MULTI_BUFFER", "2", 0);
 
-	struct egl_device device = { 0 };
-	egl_initialize(&device);
+    system("echo 0 > /sys/devices/virtual/graphics/fbcon/cursor_blink");
+    system("setterm -cursor off");
 
-	int display_width, display_height;
-	fbGetDisplayGeometry(device.display_type, &display_width, &display_height);
-
-	system("setterm -cursor off");
-
-	struct timespec time_beg, time_end;
+    struct egl_device device = { 0 };
+    egl_initialize(&device);
 
     static const GLchar *vertex_shader_source[] = {
         "attribute vec4 v_position;         \n"
@@ -171,49 +208,26 @@ int main(int argc, char *argv[])
 
     GLuint vertex_shader = gl_compile_shader(GL_VERTEX_SHADER, vertex_shader_source[0]);
     GLuint fragment_shader = gl_compile_shader(GL_FRAGMENT_SHADER, fragment_shader_source[0]);
+    GLuint program = gl_link_program(vertex_shader, fragment_shader);
 
-    GLuint program = glCreateProgram();
-
-    glAttachShader(program, vertex_shader);
-    glAttachShader(program, fragment_shader);
-
-    glLinkProgram(program);
-
-    GLint linked;
-    glGetProgramiv(program, GL_LINK_STATUS, &linked);
-    if (!linked) {
-        glDeleteProgram(program);
-        printf("ERROR: glLinkProgram()\n");
-    }
-
-    glUseProgram(program);
-
+    // -1, 1 (2) | 1, 1 (3)
+    // ----------|---------
+    // -1,-1 (0) | 1,-1 (1)
     GLfloat vertices[] = {
-        -1.0f, -1.0f,  //0.0f,
-         1.0f, -1.0f,  //0.0f
-        -1.0f,  1.0f,  //0.0f,
-         1.0f,  1.0f,  //0.0f,
+        -1.0f, -1.0f,
+         1.0f, -1.0f,
+        -1.0f,  1.0f,
+         1.0f,  1.0f,
     };
 
-//    GLfloat colors[] = {
-//        1.0f, 0.0f, 0.0f,
-//        0.0f, 1.0f, 0.0f,
-//        0.0f, 0.0f, 1.0f
-//    };
-
+    // 0, 1 (2) | 1, 1 (3)
+    // ---------|---------
+    // 0, 0 (0) | 1, 0 (1)
     GLfloat coordinates[] = {
-        1.0f, 1.0f,
+        0.0f, 0.0f,
         1.0f, 0.0f,
         0.0f, 1.0f,
-        0.0f, 0.0f
-    };
-
-    // 2x2 RGB texture
-    static const GLubyte texels[] = {
-        255,   0,   0,
-          0, 255,   0,
-          0,   0, 255,
-        255, 255,   0
+        1.0f, 1.0f,
     };
 
     GLint v_position = glGetAttribLocation(program, "v_position");
@@ -232,44 +246,59 @@ int main(int argc, char *argv[])
     glActiveTexture(texture);
     glBindTexture(GL_TEXTURE_2D, texture);
 
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 2, 2, 0, GL_RGB, GL_UNSIGNED_BYTE, texels);
+    struct gl_texture_t texture_file;
+    png_texture_load("texture.png", &texture_file);
+
+    glTexImage2D(
+        GL_TEXTURE_2D,
+        0,
+        texture_file.pixel_format,
+        texture_file.width,
+        texture_file.height,
+        0,
+        texture_file.pixel_format,
+        GL_UNSIGNED_BYTE,
+        texture_file.texels);
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
     glViewport(0, 0, device.width, device.height);
 
-//    glClearColor(128 / 255.0f, 128 / 255.0f, 128 / 255.0f, 1.0f);
-//    glClear(GL_COLOR_BUFFER_BIT);
+    //    glClearColor(128 / 255.0f, 128 / 255.0f, 128 / 255.0f, 1.0f);
+    //    glClear(GL_COLOR_BUFFER_BIT);
 
-//    glEnable(GL_BLEND);
-//    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    //    glEnable(GL_BLEND);
+    //    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
+    struct timespec time_beg, time_end, time_diff;
+
     while (!done) {
-		clock_gettime(CLOCK_MONOTONIC, &time_beg);
+        clock_gettime(CLOCK_MONOTONIC, &time_beg);
 
         eglSwapBuffers(device.display, device.surface);
 
-		clock_gettime(CLOCK_MONOTONIC, &time_end);
+        clock_gettime(CLOCK_MONOTONIC, &time_end);
+        clock_gettime_diff(&time_beg, &time_end, &time_diff);
 
-		printf("Current FPS: %.3Lf%10s\r",
-			1.0L / ((time_end.tv_sec - time_beg.tv_sec) + ((time_end.tv_nsec - time_beg.tv_nsec) / 1000000000.0)),
-			" ");
-	}
+        printf("Current FPS: %.3Lf%10s\r",
+            1.0L / (time_diff.tv_sec + time_diff.tv_nsec / 1000000000.0),
+            " ");
+    }
 
-	printf("\n");
+    printf("\n");
 
-	system("setterm -cursor on");
+    egl_deinitialize(&device);
 
-	egl_deinitialize(&device);
+    system("setterm -cursor on");
+    system("echo 1 > /sys/devices/virtual/graphics/fbcon/cursor_blink");
 
-	char cmd_line[32];
-	sprintf(cmd_line, "fbset -xres %d -yres %d", display_width, display_height);
-	system(cmd_line);
+    // Reset screen
+    char cmd_line[32];
+    sprintf(cmd_line, "fbset -xres %d -yres %d", device.width, device.height);
+    system(cmd_line);
 
-	system("echo 1 > /sys/devices/virtual/graphics/fbcon/cursor_blink");
-
-	return 0;
+    return 0;
 }
