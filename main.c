@@ -11,6 +11,9 @@
 
 #include "pngx.h"
 
+typedef void (GL_APIENTRY *PFNGLTEXDIRECTVIV)(GLenum target, GLsizei width, GLsizei height, GLenum format, GLvoid **texels);
+typedef void (GL_APIENTRY *PFNGLTEXDIRECTINVALIDATEVIV)(GLenum target);
+
 struct egl_device {
     EGLNativeDisplayType display_type;
     EGLDisplay display;
@@ -224,10 +227,10 @@ int main(int argc, char *argv[])
     // ---------|---------
     // 0, 0 (0) | 1, 0 (1)
     GLfloat coordinates[] = {
-        0.0f, 0.0f,
-        1.0f, 0.0f,
         0.0f, 1.0f,
         1.0f, 1.0f,
+        0.0f, 0.0f,
+        1.0f, 0.0f,
     };
 
     GLint v_position = glGetAttribLocation(program, "v_position");
@@ -246,19 +249,52 @@ int main(int argc, char *argv[])
     glActiveTexture(texture);
     glBindTexture(GL_TEXTURE_2D, texture);
 
-    struct gl_texture_t texture_file;
-    png_texture_load("texture.png", &texture_file);
+    {
+        PFNGLTEXDIRECTVIV glTexDirectVIV =
+            (PFNGLTEXDIRECTVIV)eglGetProcAddress("glTexDirectVIV");
+        if (!glTexDirectVIV)
+            printf("glTexDirectVIV() missing\n");
 
-    glTexImage2D(
-        GL_TEXTURE_2D,
-        0,
-        texture_file.pixel_format,
-        texture_file.width,
-        texture_file.height,
-        0,
-        texture_file.pixel_format,
-        GL_UNSIGNED_BYTE,
-        texture_file.texels);
+        PFNGLTEXDIRECTINVALIDATEVIV glTexDirectInvalidateVIV =
+            (PFNGLTEXDIRECTINVALIDATEVIV)eglGetProcAddress("glTexDirectInvalidateVIV");
+        if (!glTexDirectInvalidateVIV)
+            printf("glTexDirectInvalidateVIV() missing\n");
+
+        int w = 1920, h = 1080;
+        int y = w * h;
+        int v = y / 4;
+        int u = v;
+
+        FILE *fp = fopen("frame.yuv", "rb");
+        fseek(fp, 0, SEEK_END);
+
+        int file_size = ftell(fp);
+        int frame_size = y + u + v;
+        int frame_count = file_size / frame_size;
+
+        printf("file_size = %d, frame_size = %d, frame_count = %d\n", file_size, frame_size, frame_count);
+
+        void *planes[3];
+
+        glTexDirectVIV(
+            GL_TEXTURE_2D,
+            w,
+            h,
+            GL_VIV_YV12,
+            (GLvoid **)&planes);
+
+        fseek(fp, file_size % frame_size, SEEK_SET);
+        fread(planes[0], y, 1, fp);
+        fread(planes[1], v, 1, fp);
+        fread(planes[2], u, 1, fp);
+
+        fclose(fp);
+
+        glTexDirectInvalidateVIV(GL_TEXTURE_2D);
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    }
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
