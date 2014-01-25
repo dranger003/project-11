@@ -109,7 +109,7 @@ int egl_deinitialize(struct egl_device *device)
 	return 0;
 }
 
-GLuint gl_load_shader(GLenum type, const char *source)
+GLuint gl_compile_shader(GLenum type, const char *source)
 {
     GLuint shader = glCreateShader(type);
     if (!shader)
@@ -148,30 +148,34 @@ int main(int argc, char *argv[])
 	struct timespec time_beg, time_end;
 
     static const GLchar *vertex_shader_source[] = {
-        "attribute vec4 vPosition;      \n"
-        "                               \n"
-        "void main() {                  \n"
-        "   gl_Position = vPosition;    \n"
-        "}                              \n"
+        "attribute vec4 v_position;         \n"
+        "attribute vec2 v_coordinates;      \n"
+        "varying vec2 coordinates;          \n"
+        "                                   \n"
+        "void main() {                      \n"
+        "   gl_Position = v_position;       \n"
+        "   coordinates = v_coordinates;    \n"
+        "}                                  \n"
     };
 
     static const GLchar *fragment_shader_source[] = {
-        "precision mediump float;                       \n"
-        "                                               \n"
-        "void main() {                                  \n"
-        "   gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);    \n"
-        "}                                              \n"
+        "precision highp float;                             \n"
+        "                                                   \n"
+        "uniform sampler2D texture;                         \n"
+        "varying vec2 coordinates;                          \n"
+        "                                                   \n"
+        "void main() {                                      \n"
+        "   gl_FragColor = texture2D(texture, coordinates); \n"
+        "}                                                  \n"
     };
 
-    GLuint vertex_shader = gl_load_shader(GL_VERTEX_SHADER, vertex_shader_source[0]);
-    GLuint fragment_shader = gl_load_shader(GL_FRAGMENT_SHADER, fragment_shader_source[0]);
+    GLuint vertex_shader = gl_compile_shader(GL_VERTEX_SHADER, vertex_shader_source[0]);
+    GLuint fragment_shader = gl_compile_shader(GL_FRAGMENT_SHADER, fragment_shader_source[0]);
 
     GLuint program = glCreateProgram();
 
     glAttachShader(program, vertex_shader);
     glAttachShader(program, fragment_shader);
-
-    glBindAttribLocation(program, 0, "vPosition");
 
     glLinkProgram(program);
 
@@ -185,20 +189,63 @@ int main(int argc, char *argv[])
     glUseProgram(program);
 
     GLfloat vertices[] = {
-         0.0f,  0.5f,  0.0f,
-        -0.5f, -0.5f,  0.0f,
-         0.5f, -0.5f,  0.0f
+        -1.0f, -1.0f,  //0.0f,
+         1.0f, -1.0f,  //0.0f
+        -1.0f,  1.0f,  //0.0f,
+         1.0f,  1.0f,  //0.0f,
     };
 
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, vertices);
-    glEnableVertexAttribArray(0);
+//    GLfloat colors[] = {
+//        1.0f, 0.0f, 0.0f,
+//        0.0f, 1.0f, 0.0f,
+//        0.0f, 0.0f, 1.0f
+//    };
+
+    GLfloat coordinates[] = {
+        1.0f, 1.0f,
+        1.0f, 0.0f,
+        0.0f, 1.0f,
+        0.0f, 0.0f
+    };
+
+    // 2x2 RGB texture
+    static const GLubyte texels[] = {
+        255,   0,   0,
+          0, 255,   0,
+          0,   0, 255,
+        255, 255,   0
+    };
+
+    GLint v_position = glGetAttribLocation(program, "v_position");
+    glEnableVertexAttribArray(v_position);
+    glVertexAttribPointer(v_position, 2, GL_FLOAT, GL_FALSE, 0, vertices);
+
+    GLint v_coordinates = glGetAttribLocation(program, "v_coordinates");
+    glEnableVertexAttribArray(v_coordinates);
+    glVertexAttribPointer(v_coordinates, 2, GL_FLOAT, GL_FALSE, 0, coordinates);
+
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
+    GLuint texture;
+    glGenTextures(1, &texture);
+
+    glActiveTexture(texture);
+    glBindTexture(GL_TEXTURE_2D, texture);
+
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 2, 2, 0, GL_RGB, GL_UNSIGNED_BYTE, texels);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
     glViewport(0, 0, device.width, device.height);
 
-    glClearColor(128 / 255.0f, 128 / 255.0f, 128 / 255.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
+//    glClearColor(128 / 255.0f, 128 / 255.0f, 128 / 255.0f, 1.0f);
+//    glClear(GL_COLOR_BUFFER_BIT);
 
-    glDrawArrays(GL_TRIANGLES, 0, 3);
+//    glEnable(GL_BLEND);
+//    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
     while (!done) {
 		clock_gettime(CLOCK_MONOTONIC, &time_beg);
