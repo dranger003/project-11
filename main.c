@@ -29,6 +29,36 @@ void signal_handler(int signal)
     done = 1;
 }
 
+// t = time
+// b = beginning
+// c = change
+// d = duration
+// Example:
+// From 50 to 200 in 1 second
+// t=0s, b=50, c=150, d=1s
+double quadratic_ease_in_out(double t, double b, double c, double d)
+{
+    static double ov = 0;
+    t /= d / 2;
+    if (t < 1) {
+        double nv = c / 2 * t * t + b;
+        if (nv < ov) return ov;
+        return ov = nv, nv;
+    }
+    --t;
+    double nv = -c / 2 * (t * (t - 2) - 1) + b;
+    if (nv < ov) return ov;
+    return ov = nv, nv;
+}
+
+struct timespec clock_gettime_diff(struct timespec *time_beg, struct timespec *time_end)
+{
+    struct timespec time_diff;
+    time_diff.tv_sec = time_end->tv_sec - time_beg->tv_sec;
+    time_diff.tv_nsec = time_end->tv_nsec - time_beg->tv_nsec;
+    return time_diff;
+}
+
 int egl_initialize(struct egl_device *device)
 {
     device->display_type = (EGLNativeDisplayType)fbGetDisplayByIndex(0);
@@ -129,7 +159,20 @@ GLuint gl_compile_shader(GLenum type, const char *source)
     return shader;
 }
 
-void draw1()
+struct draw_context {
+    GLfloat vertices[8];
+    const GLfloat *coordinates;
+    const GLubyte *texels;
+    GLuint program;
+    GLint v_position;
+    GLint v_coordinates;
+    GLint texture_uniform;
+};
+
+struct draw_context draw1_context;
+struct draw_context draw2_context;
+
+void draw1_init()
 {
     static const GLchar *vertex_shader_source[] = {
         "attribute vec4 v_position;         \n"
@@ -158,6 +201,7 @@ void draw1()
     GLuint fragment_shader = gl_compile_shader(GL_FRAGMENT_SHADER, fragment_shader_source[0]);
 
     GLuint program = glCreateProgram();
+    draw1_context.program = program;
 
     glAttachShader(program, vertex_shader);
     glAttachShader(program, fragment_shader);
@@ -169,33 +213,44 @@ void draw1()
     assert(linked);
 
     glUseProgram(program);
+}
+
+void draw1()
+{
+    glUseProgram(draw1_context.program);
 
     GLfloat vertices[] = {
         -1,  1,  1,  1,
         -1, -1,  1, -1,
     };
+//    draw1_context.vertices = vertices;
 
-    GLfloat coordinates[] = {
+    static const GLfloat coordinates[] = {
         0, 0, 1, 0,
         0, 1, 1, 1,
     };
+    draw1_context.coordinates = coordinates;
 
     // 2x2 RGB texture
     static const GLubyte texels[] = {
         255,   0,   0,   0, 255,   0,
           0,   0, 255, 255, 255,   0,
     };
+    draw1_context.texels = texels;
 
-    GLint v_position = glGetAttribLocation(program, "v_position");
+    GLint v_position = glGetAttribLocation(draw1_context.program, "v_position");
     glEnableVertexAttribArray(v_position);
+    GLint v_coordinates = glGetAttribLocation(draw1_context.program, "v_coordinates");
     glVertexAttribPointer(v_position, 2, GL_FLOAT, GL_FALSE, 0, vertices);
+    draw1_context.v_position = v_position;
 
-    GLint v_coordinates = glGetAttribLocation(program, "v_coordinates");
     glEnableVertexAttribArray(v_coordinates);
     glVertexAttribPointer(v_coordinates, 2, GL_FLOAT, GL_FALSE, 0, coordinates);
+    draw1_context.v_coordinates = v_coordinates;
 
-    GLint texture_uniform = glGetUniformLocation(program, "texture");
+    GLint texture_uniform = glGetUniformLocation(draw1_context.program, "texture");
     glUniform1i(texture_uniform, 0);
+    draw1_context.texture_uniform = texture_uniform;
 
     GLuint texture;
     glGenTextures(1, &texture);
@@ -207,12 +262,12 @@ void draw1()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 2, 2, 0, GL_RGB, GL_UNSIGNED_BYTE, texels);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 2, 2, 0, GL_RGB, GL_UNSIGNED_BYTE, draw1_context.texels);
 
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 }
 
-void draw2()
+void draw2_init()
 {
     static const GLchar *vertex_shader_source[] = {
         "attribute vec4 v_position;         \n"
@@ -241,6 +296,7 @@ void draw2()
     GLuint fragment_shader = gl_compile_shader(GL_FRAGMENT_SHADER, fragment_shader_source[0]);
 
     GLuint program = glCreateProgram();
+    draw2_context.program = program;
 
     glAttachShader(program, vertex_shader);
     glAttachShader(program, fragment_shader);
@@ -255,32 +311,53 @@ void draw2()
 
     GLfloat x = 640 / 960.0;
     GLfloat y = 360 / 540.0;
-    GLfloat vertices[] = {
-        -x,  y,  x,  y,
-        -x, -y,  x, -y,
-    };
+    draw2_context.vertices[0] = -x;
+    draw2_context.vertices[1] = y;
+    draw2_context.vertices[2] = x;
+    draw2_context.vertices[3] = y;
+    draw2_context.vertices[4] = -x;
+    draw2_context.vertices[5] = -y;
+    draw2_context.vertices[6] = x;
+    draw2_context.vertices[7] = -y;
+}
 
-    GLfloat coordinates[] = {
+void draw2()
+{
+    glUseProgram(draw2_context.program);
+
+//    GLfloat x = 640 / 960.0;
+//    GLfloat y = 360 / 540.0;
+//    GLfloat vertices[] = {
+//        -x,  y,  x,  y,
+//        -x, -y,  x, -y,
+//    };
+
+    static const GLfloat coordinates[] = {
         0, 0, 1, 0,
         0, 1, 1, 1,
     };
+    draw2_context.coordinates = coordinates;
 
     // 2x2 RGB texture
     static const GLubyte texels[] = {
           0,   0, 255,   0,   0, 255,
           0,   0, 255,   0,   0, 255,
     };
+    draw2_context.texels = texels;
 
-    GLint v_position = glGetAttribLocation(program, "v_position");
+    GLint v_position = glGetAttribLocation(draw2_context.program, "v_position");
     glEnableVertexAttribArray(v_position);
-    glVertexAttribPointer(v_position, 2, GL_FLOAT, GL_FALSE, 0, vertices);
+    glVertexAttribPointer(v_position, 2, GL_FLOAT, GL_FALSE, 0, draw2_context.vertices);
+    draw2_context.v_position = v_position;
 
-    GLint v_coordinates = glGetAttribLocation(program, "v_coordinates");
+    GLint v_coordinates = glGetAttribLocation(draw2_context.program, "v_coordinates");
     glEnableVertexAttribArray(v_coordinates);
     glVertexAttribPointer(v_coordinates, 2, GL_FLOAT, GL_FALSE, 0, coordinates);
+    draw2_context.v_coordinates = v_coordinates;
 
-    GLint texture_uniform = glGetUniformLocation(program, "texture");
+    GLint texture_uniform = glGetUniformLocation(draw2_context.program, "texture");
     glUniform1i(texture_uniform, 0);
+    draw2_context.texture_uniform = texture_uniform;
 
     GLuint texture;
     glGenTextures(1, &texture);
@@ -292,13 +369,39 @@ void draw2()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 2, 2, 0, GL_RGB, GL_UNSIGNED_BYTE, texels);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 2, 2, 0, GL_RGB, GL_UNSIGNED_BYTE, draw2_context.texels);
 
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 }
 
 int main(int argc, char *argv[])
 {
+//    {
+//        system("echo 0 > /sys/devices/virtual/graphics/fbcon/cursor_blink");
+//        system("setterm -cursor off");
+
+//        struct timespec time_beg, time_end, time_diff;
+//        double elapsed = 0, v;
+//        int done = 0;
+
+//        clock_gettime(CLOCK_MONOTONIC, &time_beg);
+//        do {
+//            v = quadratic_ease_in_out(elapsed, 50, 200, 2.5);
+//            printf("%.3fs, %.3f                \r", elapsed, v);
+
+//            clock_gettime(CLOCK_MONOTONIC, &time_end);
+//            time_diff = clock_gettime_diff(&time_beg, &time_end);
+//            elapsed = time_diff.tv_sec + time_diff.tv_nsec / 1000000000.0;
+//            if (elapsed > 3)
+//                done = 1;
+//        } while (!done);
+
+//        printf("\n");
+
+//        system("setterm -cursor on");
+//        system("echo 1 > /sys/devices/virtual/graphics/fbcon/cursor_blink");
+//    }
+
     signal(SIGINT, &signal_handler);
     signal(SIGTERM, &signal_handler);
 
@@ -317,17 +420,48 @@ int main(int argc, char *argv[])
 
     glViewport(0, 0, device.width, device.height);
 
-    glClearColor(0, 0, 0, 1);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
-
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    draw1();
-    draw2();
+    {
+        glClearColor(0, 0, 0, 1);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+
+        draw1_init();
+        draw2_init();
+    }
+
+    struct timespec t1, t2, d;
+    double e, v;
+    clock_gettime(CLOCK_MONOTONIC, &t1);
 
     while (!done) {
         clock_gettime(CLOCK_MONOTONIC, &time_beg);
+
+        {
+            glClearColor(0, 0, 0, 1);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+
+            clock_gettime(CLOCK_MONOTONIC, &t2);
+            d = clock_gettime_diff(&t1, &t2);
+            e = d.tv_sec + d.tv_nsec / 1000000000.0;
+
+            v = quadratic_ease_in_out(e, 0, 640, 0.25);
+
+            GLfloat x = v / 960.0;
+            GLfloat y = 360 / 540.0;
+            draw2_context.vertices[0] = -x;
+            draw2_context.vertices[1] = y;
+            draw2_context.vertices[2] = x;
+            draw2_context.vertices[3] = y;
+            draw2_context.vertices[4] = -x;
+            draw2_context.vertices[5] = -y;
+            draw2_context.vertices[6] = x;
+            draw2_context.vertices[7] = -y;
+
+            draw1();
+            draw2();
+        }
 
         eglSwapBuffers(device.display, device.surface);
 
