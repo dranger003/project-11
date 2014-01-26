@@ -250,24 +250,20 @@ int main(int argc, char *argv[])
     GLuint program = gl_link_program(vertex_shader, fragment_shader);
     assert(program != -1);
 
-    // -1, 1 (0) | 1, 1 (2)
+    // -1, 1 (0) | 1, 1 (1)
     // ----------|---------
-    // -1,-1 (1) | 1,-1 (3)
+    // -1,-1 (2) | 1,-1 (3)
     GLfloat vertices[] = {
-        -1.0f,  1.0f,
-        -1.0f, -1.0f,
-         1.0f,  1.0f,
-         1.0f, -1.0f,
+        -1,  1,  1,  1,
+        -1, -1,  1, -1,
     };
 
-    // 0, 1 (1) | 1, 1 (3)
+    // 0, 0 (2) | 1, 0 (3)
     // ---------|---------
-    // 0, 0 (0) | 1, 0 (2)
+    // 0, 1 (0) | 1, 1 (1)
     GLfloat coordinates[] = {
-        0.0f, 0.0f,
-        0.0f, 1.0f,
-        1.0f, 0.0f,
-        1.0f, 1.0f,
+        0, 0, 1, 0,
+        0, 1, 1, 1,
     };
 
     GLint v_position = glGetAttribLocation(program, "v_position");
